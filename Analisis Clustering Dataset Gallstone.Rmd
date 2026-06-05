@@ -1,0 +1,349 @@
+---
+title: "Analisis Clustering Dataset Gallstone"
+author: "Rahayu Puspita Sari"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+---
+
+Dataset Gallstone merupakan dataset klinis yang tersedia pada UCI
+Machine Learning Repository dan digunakan untuk penelitian prediksi
+penyakit batu empedu (gallstone disease). Dataset ini dikumpulkan dari
+pasien yang berobat di Klinik Rawat Jalan Penyakit Dalam Ankara VM
+Medical Park Hospital, Turki, selama periode Juni 2022 hingga Juni 2023.
+Dataset terdiri dari 319 pasien.
+
+Dataset memiliki 38 atribut, yang mencakup data demografi, bioimpedansi tubuh, dan hasil pemeriksaan laboratorium.Variabel demografi yang tersedia meliputi usia, jenis kelamin, tinggi badan, berat badan, dan indeks massa tubuh (BMI). Variabel bioimpedansi mencakup Total Body Water (TBW), Extracellular Water (ECW), Intracellular Water (ICW), Lean Mass (LM), Muscle Mass (MM), Visceral Fat Area (VFA), dan Hepatic Fat Accumulation (HFA). Selain itu, dataset juga memuat berbagai parameter laboratorium seperti glukosa, kolesterol total, HDL, LDL, trigliserida, AST, ALT, ALP, kreatinin, GFR, CRP, hemoglobin, dan vitamin D.
+
+
+Esen, I., Arslan, H., Aktürk Esen, S., Gülşen, M., Kültekin, N., & Özdemir, O. (2024). Gallstone [Dataset]. 
+
+UCI Machine Learning Repository https://archive.ics.uci.edu/dataset/1150/gallstone-1
+
+https://doi.org/10.1097/md.0000000000037258
+
+# Setup dan Load Data
+
+```{r include=FALSE}
+# 1. LOAD PACKAGE 
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cluster)
+library(factoextra)
+library(gridExtra)
+library(corrplot)
+library(fpc)
+library(pvclust)
+library(kmed)
+```
+
+```{r}
+# 2. IMPORT DATA
+data_gallstone <- read_excel("C:/Users/rahay/Downloads/gallstone-1/dataset-uci/dataset-uci.xlsx")
+
+head(data_gallstone)
+```
+
+
+# Deskripsi Data
+
+```{r}
+dim(data_gallstone)
+nrow(data_gallstone)
+ncol(data_gallstone)
+str(data_gallstone)
+summary(data_gallstone)
+colnames(data_gallstone)
+```
+
+Dataset Gallstone yang digunakan dalam analisis ini berasal dari UCI Machine Learning Repository dan berisi data klinis pasien yang digunakan untuk penelitian terkait penyakit batu empedu (gallstone disease).
+
+Berdasarkan hasil fungsi dim(), dataset terdiri dari 319 observasi dan 38 variabel. Jumlah observasi tersebut menunjukkan banyaknya data pasien yang tersedia, sedangkan 38 variabel mencakup berbagai karakteristik demografi, komposisi tubuh, serta hasil pemeriksaan laboratorium.
+
+Hasil fungsi str() menunjukkan bahwa sebagian besar variabel bertipe numerik, sehingga dapat langsung digunakan dalam proses clustering. Variabel Gallstone Status digunakan sebagai label referensi untuk mengetahui kondisi pasien, namun tidak digunakan dalam pembentukan cluster karena clustering merupakan metode unsupervised learning.
+
+Fungsi summary() memberikan ringkasan statistik deskriptif untuk setiap variabel, seperti nilai minimum, kuartil pertama, median, rata-rata, kuartil ketiga, dan maksimum. Ringkasan ini menunjukkan bahwa setiap variabel memiliki rentang nilai yang berbeda-beda. Sebagai contoh, variabel usia (Age) memiliki skala yang berbeda dibandingkan dengan variabel laboratorium seperti glukosa (Glucose) atau trigliserida (Triglycerides). Oleh karena itu, proses standardisasi diperlukan sebelum dilakukan analisis clustering agar seluruh variabel memiliki kontribusi yang seimbang.
+
+Selain itu, hasil fungsi colnames() menunjukkan nama-nama variabel yang terdapat dalam dataset, yang akan digunakan pada tahap eksplorasi data dan pembentukan cluster selanjutnya.
+
+# Eksplorasi Data
+
+## Distribusi Status Gallstone
+
+```{r}
+table(data_gallstone$`Gallstone Status`)
+
+ggplot(data_gallstone,
+       aes(x = factor(`Gallstone Status`))) +
+  geom_bar(fill = "steelblue") +
+  labs(
+    title = "Distribusi Status Gallstone",
+    x = "Status",
+    y = "Jumlah Pasien"
+  ) +
+  theme_minimal()
+```
+
+Berdasarkan hasil tabulasi dan diagram batang, jumlah pasien yang terdiagnosis batu empedu sebanyak 161 orang dan yang tidak terdiagnosis sebanyak 158 orang. Distribusi kedua kategori relatif seimbang sehingga dataset memiliki representasi yang baik untuk analisis clustering
+
+## Missing Value
+
+```{r}
+colSums(is.na(data_gallstone))
+
+sum(is.na(data_gallstone))
+```
+
+Berdasarkan hasil pemeriksaan missing value, tidak ditemukan nilai yang hilang pada seluruh variabel dalam dataset. Oleh karena itu, tidak diperlukan proses penanganan data hilang (missing value treatment) sebelum analisis clustering dilakukan.
+
+## Statistik Deskriptif
+
+```{r}
+
+summary(data_gallstone)
+
+```
+
+Berdasarkan statistik deskriptif, variabel dalam dataset memiliki rentang nilai yang beragam. Usia pasien berkisar antara 20–96 tahun dengan rata-rata 48,07 tahun, sedangkan rata-rata BMI sebesar 28,88. Perbedaan skala antar variabel menunjukkan perlunya standardisasi data sebelum dilakukan analisis clustering
+
+# Persiapan Data
+
+## Memisahkan Target
+
+```{r}
+
+X <- data_gallstone %>% select(-`Gallstone Status`)
+y <- data_gallstone %>% select(`Gallstone Status`)
+
+```
+
+Variabel Gallstone Status dipisahkan dari data utama. Seluruh variabel selain target digunakan sebagai input dalam proses clustering, sedangkan variabel target hanya digunakan untuk keperluan evaluasi dan interpretasi hasil.
+
+## Standarisasi
+
+```{r}
+
+X_scaled <- scale(X)
+```
+
+Standardisasi dilakukan menggunakan fungsi scale() untuk mengubah seluruh variabel ke dalam skala yang sama dengan rata-rata (mean) 0 dan simpangan baku (standard deviation) 1. Proses ini diperlukan karena variabel pada dataset memiliki rentang nilai yang berbeda-beda, sehingga tidak ada variabel yang mendominasi pembentukan cluster akibat perbedaan skala pengukuran.
+
+# Menentukan Jumlah Cluster
+
+## Elbow Method
+
+```{r}
+
+# Elbow Method
+wcss <- numeric(10)
+
+for(i in 1:10){
+  km_temp <- kmeans(X_scaled, centers = i)
+  wcss[i] <- km_temp$tot.withinss
+}
+
+plot(1:10, wcss,
+     type = "b",
+     xlab = "Jumlah Cluster",
+     ylab = "WCSS",
+     main = "Elbow Method")
+```
+Berdasarkan grafik Elbow Method, terjadi penurunan nilai WCSS yang cukup tajam dari cluster 1 hingga cluster 4, kemudian penurunannya mulai melandai. Titik siku (elbow) terlihat berada di sekitar k = 2 hingga k = 4, sehingga jumlah cluster optimal berada pada rentang tersebut dan perlu dikonfirmasi menggunakan metode lain, yaitu Silhouette Method.
+
+## Silhouette Method
+
+```{r}
+# Silhouette
+dist_gallstone <- dist(X_scaled)
+
+clust2 <- skm(dist_gallstone, 2)
+clust3 <- skm(dist_gallstone, 3)
+
+sil_2 <- silhouette(clust2$cluster, dist_gallstone)
+sil_3 <- silhouette(clust3$cluster, dist_gallstone)
+
+mean(sil_2[, 3])
+mean(sil_3[, 3])
+```
+
+Nilai rata-rata silhouette untuk 2 cluster sebesar 0,1851, sedangkan untuk 3 cluster sebesar 0,1343. Karena nilai silhouette pada 2 cluster lebih tinggi, maka jumlah cluster optimal yang dipilih adalah 2 cluster
+
+# K-Means Clustering
+
+```{r}
+set.seed(123)
+km <- kmeans(X_scaled, centers = 2, nstart = 25, iter.max = 100)
+
+```
+
+## Ukuran Cluster
+
+```{r}
+km$size
+km$withinss
+km$tot.withinss
+km$betweenss
+```
+
+Hasil K-Means dengan jumlah cluster sebanyak 2 menghasilkan Cluster 1 sebanyak 161 observasi dan Cluster 2 sebanyak 158 observasi. Jumlah anggota pada kedua cluster relatif seimbang, menunjukkan bahwa data terbagi secara proporsional
+
+Nilai total within-cluster sum of squares (Tot.WithinSS) sebesar 9708,676 menunjukkan variasi data di dalam cluster. Sementara itu, nilai between-cluster sum of squares (BetweenSS) sebesar 2375,324 menunjukkan variasi antar cluster yang berhasil dijelaskan oleh proses clustering.
+
+## Persentase Keragaman
+```{r}
+round(km$betweenss / km$totss * 100, 2)
+```
+
+Persentase keragaman yang dapat dijelaskan oleh hasil clustering sebesar 19,66%. Hal ini menunjukkan bahwa pemisahan antar cluster masih relatif rendah, sehingga karakteristik antar cluster belum terpisah secara kuat. Namun, hasil ini masih dapat digunakan untuk mengidentifikasi pola pengelompokan awal pada dataset Gallstone.
+
+## Profil rata-rata per cluster
+```{r}
+data_gallstone %>%
+  mutate(Cluster = factor(km$cluster)) %>%
+  group_by(Cluster) %>%
+  summarise(across(where(is.numeric), ~round(mean(.), 3)))
+```
+
+Berdasarkan nilai rata-rata setiap variabel, terdapat perbedaan karakteristik antara kedua cluster. Perbedaan paling jelas terlihat pada variabel Gender, di mana Cluster 1 didominasi oleh satu kelompok gender (rata-rata 0,012), sedangkan Cluster 2 didominasi oleh kelompok gender lainnya (rata-rata 0,981). Sementara itu, rata-rata usia dan komorbiditas pada kedua cluster relatif serupa. Hasil ini menunjukkan bahwa variabel gender memiliki kontribusi yang cukup besar dalam proses pengelompokan data.
+
+## Visualisasi PCA 2D
+
+```{r}
+fviz_cluster(km,
+             data         = X_scaled,
+             geom         = "point",
+             ellipse      = TRUE,
+             ellipse.type = "convex",
+             palette      = c("blue", "red"),
+             ggtheme      = theme_minimal(),
+             main         = "K-Means Clustering (k=2)")
+```
+
+Berdasarkan visualisasi PCA, dua cluster yang terbentuk terlihat cukup terpisah meskipun masih terdapat beberapa observasi yang saling tumpang tindih. Hal ini menunjukkan bahwa K-Means mampu membentuk kelompok data yang berbeda, namun pemisahan antar cluster belum sepenuhnya optimal
+
+# Hierarchical Clustering
+
+```{r}
+dist_data <- dist(X_scaled, method = "euclidean")
+```
+
+## Single Linkage 
+
+```{r}
+single <- hclust(dist_data, method = "single")
+plot(single, main = "Single Linkage", xlab = "", sub = "", cex = 0.4)
+```
+
+Dendrogram Single Linkage menunjukkan pola chaining effect, yaitu banyak observasi bergabung secara bertahap membentuk rantai panjang. Pola ini menyebabkan cluster yang terbentuk cenderung kurang kompak dan sensitif terhadap outlier
+
+## Complete Linkage
+
+```{r}
+complete <- hclust(dist_data, method = "complete")
+plot(complete, main = "Complete Linkage", xlab = "", sub = "", cex = 0.4)
+```
+
+Dendrogram Complete Linkage menghasilkan struktur cluster yang lebih jelas dibandingkan Single Linkage. Penggabungan cluster terjadi pada jarak yang lebih besar sehingga kelompok yang terbentuk cenderung lebih kompak dan terpisah
+
+
+## Centroid Linkage
+
+```{r}
+centroid <- hclust(dist_data, method = "centroid")
+plot(centroid, main = "Centroid Linkage", xlab = "", sub = "", cex = 0.4)
+```
+
+Dendrogram Centroid Linkage menunjukkan proses penggabungan cluster berdasarkan titik pusat (centroid) masing-masing cluster. Struktur cluster yang terbentuk terlihat cukup kompleks sehingga interpretasi jumlah cluster optimal menjadi kurang jelas dibandingkan metode Complete atau Ward
+
+## Ward Method
+
+```{r}
+ward <- hclust(dist_data, method = "ward.D2")
+plot(ward, main = "Ward Method", xlab = "", sub = "", cex = 0.4)
+```
+
+Dendrogram Ward Method menunjukkan pemisahan cluster yang lebih jelas dibandingkan metode lainnya. Metode ini menghasilkan cluster yang relatif homogen karena meminimalkan variasi dalam cluster (within-cluster variance), sehingga dipilih sebagai metode hierarchical clustering yang digunakan pada tahap selanjutnya.
+
+## Kesimpulan 
+
+Berdasarkan perbandingan dendrogram, metode Complete Linkage dan Ward Method menghasilkan struktur cluster yang lebih jelas dibandingkan Single Linkage dan Centroid Linkage. Oleh karena itu, Ward Method dipilih untuk pembentukan cluster karena menghasilkan kelompok yang lebih homogen dan mudah diinterpretasikan
+
+## Cut tree jadi 2 cluster
+
+```{r}
+hc_cluster <- cutree(ward, k = 2)
+```
+
+# Perbandingan K-Means vs Hierarchical
+
+```{r}
+table(KMeans = km$cluster, Hierarchical = hc_cluster)
+```
+
+Hasil perbandingan menunjukkan bahwa sebagian besar observasi memiliki pengelompokan yang sama antara metode K-Means dan Hierarchical Clustering. Sebanyak 158 observasi pada Cluster 1 K-Means juga berada pada Cluster 1 Hierarchical, sedangkan 158 observasi pada Cluster 2 K-Means berada pada Cluster 2 Hierarchical. Hanya terdapat 3 observasi yang memiliki perbedaan pengelompokan antara kedua metode. Hal ini menunjukkan bahwa hasil clustering yang diperoleh relatif konsisten dan memiliki tingkat kesesuaian yang tinggi
+
+# Evaluasi Cluster
+
+## Silhouette K-Means
+
+```{r}
+sil_km <- silhouette(
+  km$cluster,
+  dist(X_scaled)
+)
+
+mean(sil_km[,3])
+
+fviz_silhouette(sil_km)
+```
+
+Hasil perhitungan menunjukkan bahwa rata-rata Silhouette Coefficient untuk K-Means sebesar 0,2018. Nilai ini menunjukkan bahwa pemisahan antar cluster masih relatif lemah karena berada di bawah 0,25. Meskipun demikian, cluster yang terbentuk masih mampu menunjukkan adanya pola pengelompokan dalam data
+
+## Silhouette Hierarchical
+
+```{r}
+sil_hc <- silhouette(
+  hc_cluster,
+  dist(X_scaled)
+)
+
+mean(sil_hc[,3])
+
+fviz_silhouette(sil_hc)
+```
+
+Hasil perhitungan menunjukkan bahwa rata-rata Silhouette Coefficient untuk Hierarchical Clustering sebesar 0,1978. Nilai ini menunjukkan bahwa kualitas pemisahan cluster masih relatif rendah karena berada di bawah 0,25. Meskipun demikian, metode Hierarchical Clustering tetap mampu membentuk dua kelompok data yang cukup berbeda.
+
+## Cluster Stability dengan Bootstrap
+
+```{r}
+skmfunc <- function(x, nclust){
+  skm(x, nclust)$cluster
+}
+
+boot2 <- clustboot(dist_gallstone,
+                   nclust = 2,
+                   nboot = 50,
+                   algorithm = skmfunc)
+
+consensus2 <- consensusmatrix(boot2, nclust = 2)
+
+clustheatmap(consensus2, "Cluster 2")
+```
+
+Grafik Cluster Heatmap untuk 2 cluster menunjukkan terbentuknya dua blok matriks berwarna merah solid yang terpisah secara tegas di sepanjang garis diagonal. Pola blok yang bersih dan minim pemisahan acak ini mengindikasikan bahwa hasil pengelompokan memiliki stabilitas dan konsistensi yang sangat tinggi (high consensus) ketika diuji menggunakan metode bootstrap.
+
+# Kesimpulan
+
+Berdasarkan hasil Elbow Method dan Silhouette Method, jumlah cluster optimal yang digunakan pada dataset Gallstone adalah 2 cluster. Hasil K-Means Clustering menghasilkan dua cluster yang relatif seimbang dengan jumlah anggota 161 dan 158 observasi. Sementara itu, Hierarchical Clustering menggunakan metode Ward juga menghasilkan struktur cluster yang hampir sama dengan K-Means, dengan hanya 3 observasi yang memiliki perbedaan pengelompokan.
+
+Evaluasi menggunakan Silhouette Coefficient menunjukkan bahwa K-Means memiliki nilai sebesar 0,2018, sedangkan Hierarchical Clustering memiliki nilai sebesar 0,1978. Meskipun kedua nilai tersebut menunjukkan kualitas pemisahan cluster yang masih rendah, K-Means memberikan nilai silhouette yang sedikit lebih tinggi dibandingkan Hierarchical Clustering.
+
+Oleh karena itu, K-Means Clustering dipilih sebagai metode yang lebih baik pada dataset Gallstone karena menghasilkan kualitas cluster yang sedikit lebih baik berdasarkan nilai silhouette. Namun, perbedaan performa antara kedua metode relatif kecil sehingga keduanya menghasilkan pola pengelompokan yang hampir serupa.
